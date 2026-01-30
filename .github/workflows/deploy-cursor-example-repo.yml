@@ -77,6 +77,12 @@ jobs:
           echo "BACKUP_EXISTING=${BACKUP_EXISTING}" >> $GITHUB_ENV
           echo "Deployment confirmed. Proceeding..."
 
+      - name: Purge nginx (clean reinstall)
+        run: |
+          echo "=== PURGE NGINX ==="
+          sudo apt-get remove --purge -y nginx nginx-common 2>/dev/null || true
+          echo "Done."
+
       - name: Install system packages (Ubuntu 24)
         run: |
           echo "=== APT INSTALL ==="
@@ -144,6 +150,17 @@ jobs:
               sudo chmod -R 755 "/$root/$name"
             done
           done
+          echo "Done."
+
+      - name: Install default web page
+        run: |
+          echo "=== DEFAULT PAGE ==="
+          sudo mkdir -p /var/www/html
+          if [ -f /opt/cursor-example-repo/html/index.html ]; then
+            sudo cp /opt/cursor-example-repo/html/index.html /var/www/html/
+            sudo chown www-data:www-data /var/www/html/index.html
+            echo "Default page installed to /var/www/html."
+          fi
           echo "Done."
 
       - name: Verify deployment
