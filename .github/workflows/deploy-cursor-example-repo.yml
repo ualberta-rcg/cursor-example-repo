@@ -159,3 +159,14 @@ jobs:
             done
           done
           echo "Done."
+
+      - name: Enable and reload nginx
+        run: |
+          echo "=== NGINX ==="
+          sudo systemctl enable nginx 2>/dev/null || true
+          if sudo systemctl is-active nginx >/dev/null 2>&1; then
+            sudo nginx -t && sudo systemctl reload nginx && echo "nginx reloaded."
+          else
+            sudo systemctl start nginx && echo "nginx started."
+          fi
+          echo "Done."
