@@ -1,0 +1,3 @@
+# One package per line. Lines starting with # are ignored.
+# Ubuntu 24; installed by deploy workflow (apt-get install -y).
+# curl

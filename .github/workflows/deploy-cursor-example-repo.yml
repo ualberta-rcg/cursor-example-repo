@@ -1,0 +1,161 @@
+# Deploy system layout to machine
+#
+# Repo root can have etc/, opt/, home/, etc. Each is copied into the same path on the system:
+#   repo etc/*  → /etc/
+#   repo opt/*  → /opt/
+#   repo home/* → /home/
+# Clone in Actions workspace; workflow copies each root dir's contents into place.
+# Runner must have sudo access.
+name: Deploy to System
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'opt/**'
+      - 'etc/**'
+      - 'home/**'
+      - 'packages.txt'
+      - '.github/workflows/deploy-cursor-example-repo.yml'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy from'
+        required: false
+        default: 'main'
+        type: string
+      backup_existing:
+        description: 'Backup existing targets before deployment'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      confirm_deployment:
+        description: 'Confirm you want to deploy to system'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+# Root-level dirs in repo that map 1:1 to system paths (repo etc -> /etc, etc.)
+env:
+  DEPLOY_ROOTS: etc opt home
+
+jobs:
+  deploy:
+    name: Deploy to system
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Validate deployment parameters
+        run: |
+          echo "=== DEPLOYMENT VALIDATION ==="
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "Auto-deploying from push to ${{ github.ref_name }}"
+            BACKUP_EXISTING="true"
+            CONFIRM_DEPLOYMENT="true"
+          else
+            BACKUP_EXISTING="${{ github.event.inputs.backup_existing }}"
+            CONFIRM_DEPLOYMENT="${{ github.event.inputs.confirm_deployment }}"
+            echo "Backup existing: ${BACKUP_EXISTING}"
+            echo "Confirm deployment: ${CONFIRM_DEPLOYMENT}"
+            if [ "${CONFIRM_DEPLOYMENT}" != "true" ]; then
+              echo "Deployment not confirmed. Exiting."
+              exit 1
+            fi
+          fi
+          echo "BACKUP_EXISTING=${BACKUP_EXISTING}" >> $GITHUB_ENV
+          echo "Deployment confirmed. Proceeding..."
+
+      - name: Install system packages (Ubuntu 24)
+        run: |
+          echo "=== APT INSTALL ==="
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -qq
+          if [ -f packages.txt ] && [ -s packages.txt ]; then
+            packages=$(grep -v '^#' packages.txt | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+            if [ -n "$packages" ]; then
+              echo "Installing: $packages"
+              sudo apt-get install -y $packages
+            else
+              echo "No packages to install (packages.txt empty or only comments)."
+            fi
+          else
+            echo "No packages.txt or empty; skipping apt install."
+          fi
+          echo "Done."
+
+      - name: Check source directories
+        run: |
+          echo "=== SOURCE CHECK ==="
+          found=
+          for root in ${{ env.DEPLOY_ROOTS }}; do
+            if [ -d "$root" ]; then
+              echo "$root/ -> /$root/"
+              ls -la "$root/" || true
+              found=1
+            fi
+          done
+          if [ -z "$found" ]; then
+            echo "None of (${{ env.DEPLOY_ROOTS }}) found at repo root."
+            exit 1
+          fi
+
+      - name: Backup existing
+        if: env.BACKUP_EXISTING == 'true'
+        run: |
+          echo "=== BACKUP ==="
+          for root in ${{ env.DEPLOY_ROOTS }}; do
+            [ -d "$root" ] || continue
+            for f in "$root"/*; do
+              [ -e "$f" ] || break
+              name=$(basename "$f")
+              if [ -e "/$root/$name" ]; then
+                b="/$root/$name-backup-$(date +%Y%m%d-%H%M%S)"
+                echo "Backing up /$root/$name to $b"
+                sudo cp -r "/$root/$name" "$b"
+                sudo chown -R $USER:$USER "$b"
+              fi
+            done
+          done
+
+      - name: Deploy root dirs to system
+        run: |
+          echo "=== DEPLOY ==="
+          for root in ${{ env.DEPLOY_ROOTS }}; do
+            [ -d "$root" ] || continue
+            echo "Copying $root/* -> /$root/"
+            sudo mkdir -p "/$root"
+            for f in "$root"/*; do
+              [ -e "$f" ] || break
+              name=$(basename "$f")
+              sudo cp -r "$f" "/$root/"
+              sudo chown -R root:root "/$root/$name"
+              sudo chmod -R 755 "/$root/$name"
+            done
+          done
+          echo "Done."
+
+      - name: Verify deployment
+        run: |
+          echo "=== VERIFY ==="
+          for root in ${{ env.DEPLOY_ROOTS }}; do
+            [ -d "$root" ] || continue
+            echo "/$root/:"
+            for f in "$root"/*; do
+              [ -e "$f" ] || break
+              name=$(basename "$f")
+              [ -e "/$root/$name" ] && ls -la "/$root/$name" || true
+            done
+          done
+          echo "Done."
