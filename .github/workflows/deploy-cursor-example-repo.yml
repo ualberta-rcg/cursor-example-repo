@@ -86,7 +86,7 @@ jobs:
             packages=$(grep -v '^#' packages.txt | grep -v '^[[:space:]]*$' | tr '\n' ' ')
             if [ -n "$packages" ]; then
               echo "Installing: $packages"
-              sudo apt-get install -y $packages
+              sudo apt-get install -y -o Dpkg::Options::="--force-confold" $packages
             else
               echo "No packages to install (packages.txt empty or only comments)."
             fi
